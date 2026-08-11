@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Socratic — a guide, not an answer</title>
+<title>Nudge — a guide, not an answer</title>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
 
@@ -287,7 +287,7 @@ textarea.input::placeholder { color: #b8ab8a; }
       body: JSON.stringify({ question, profile: state.profile })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Request failed');
+    if (!res.ok) throw new Error((data.error || 'Request failed') + (data.detail ? ': ' + String(data.detail).slice(0,200) : ''));
     return data;
   }
 
@@ -303,14 +303,14 @@ textarea.input::placeholder { color: #b8ab8a; }
       })
     });
     const data = await res.json();
-    if (!res.ok) throw new Error(data.error || 'Request failed');
+    if (!res.ok) throw new Error((data.error || 'Request failed') + (data.detail ? ': ' + String(data.detail).slice(0,200) : ''));
     return data.feedback;
   }
 
   function render() {
     if (state.phase === 'profile') {
       root.innerHTML = `
-        <p class="eyebrow">— before we begin</p>
+        <p class="eyebrow">Nudge — before we begin</p>
         <h1 class="title">Quick bit of context.</h1>
         <p class="sub">This helps the guide match your school level and curriculum, rather than guessing.</p>
         <div class="card">
@@ -349,7 +349,7 @@ textarea.input::placeholder { color: #b8ab8a; }
 
     if (state.phase === 'intro' || state.phase === 'loading') {
       root.innerHTML = `
-        <p class="eyebrow">— a guide, not an answer</p>
+        <p class="eyebrow">Nudge — a guide, not an answer</p>
         <h1 class="title">Ask something.<br/>Find your own way there.</h1>
         <p class="sub">Put in a question. Instead of the answer, you'll get a sequence of steps built to lead you to it yourself — the way a good tutor would, not a search engine.</p>
         <p style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-paper-dim);margin:0 0 20px;">
