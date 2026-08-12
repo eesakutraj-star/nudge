@@ -1,39 +1,3 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Nudge — a guide, not an answer</title>
-<style>
-@import url('https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
-
-* { box-sizing: border-box; }
-
-body {
-  --ink: #1C2333;
-  --ink-soft: #262E42;
-  --paper: #F6F1E4;
-  --rule: #C9BFA6;
-  --accent: #D8933C;
-  --accent-dim: #B87A2C;
-  --sage: #6B8F71;
-  --text-ink: #2A2318;
-  --text-ink-soft: #6b6250;
-  --text-paper: #EDE6D6;
-  --text-paper-dim: #9AA1B5;
-
-  margin: 0;
-  background: var(--ink);
-  color: var(--text-paper);
-  font-family: 'Inter', sans-serif;
-  min-height: 100vh;
-  padding: 48px 20px 80px;
-  display: flex;
-  justify-content: center;
-}
-
-.wrap { width: 100%; max-width: 640px; }
-
 .eyebrow {
   font-family: 'IBM Plex Mono', monospace;
   font-size: 12px;
@@ -44,7 +8,145 @@ body {
 }
 .title {
   font-family: 'Fraunces', serif;
-  font-weight: 500;
+  font-weight: 500;export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { question, steps, notes, reflection } = req.body || {};
+  if (!question || !Array.isArray(steps) || !reflection) {
+    return res.status(400).json({ error: 'Missing question, steps, or reflection' });
+  }
+
+  const summary = steps.map((s, i) =>
+    `Step ${i + 1} (${s.label}): ${s.prompt}\nTheir notes: ${(notes && notes[i]) || '(none)'}`
+  ).join('\n\n');
+
+  const system = `You are a Socratic thinking guide. The person worked through a guided reasoning path for their own question and has now written their own conclusion. NEVER state whether a factual answer is "correct" by revealing it yourself, and never supply the answer if they haven't essentially arrived at it themselves. Instead, respond in 2-4 sentences: point out where their reasoning is solid, and if there's a gap or shaky step, ask a pointed follow-up question that sends them back to check it rather than fixing it for them. Warm, direct, no fluff, no markdown.`;
+
+  const userText = `Original question: ${question}\n\nGuided path so far:\n${summary}\n\nTheir stated conclusion: ${reflection}`;
+
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY is missing or empty on the server' });
+  }
+
+  try {
+    const r = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: userText }] }]
+        })
+      }
+    );
+
+    if (!r.ok) {
+      const detail = await r.text();
+      return res.status(502).json({ error: 'Upstream error', detail });
+    }
+
+    const data = await r.json();
+    const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+    const text = parts.map(p => p.text || '').join('\n').trim();
+    return res.status(200).json({ feedback: text });
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Unknown error' });
+  }
+}
+
+export default async function handler(req, res) {
+  if (req.method !== 'POST') {
+    return res.status(405).json({ error: 'Method not allowed' });
+  }
+
+  const { question, profile } = req.body || {};
+  if (!question || typeof question !== 'string' || !question.trim()) {
+    return res.status(400).json({ error: 'Missing question' });
+  }
+
+  const country = (profile && profile.country) ? String(profile.country).slice(0, 80) : '';
+  const year = (profile && profile.year) ? String(profile.year).slice(0, 40) : '';
+  const age = (profile && profile.age) ? String(profile.age).slice(0, 10) : '';
+  const profileLine = (country || year || age)
+    ? `The person is ${age ? age + ' years old, ' : ''}in school year/grade "${year || 'unspecified'}", in ${country || 'an unspecified country'}. Calibrate vocabulary, complexity, and any curriculum or subject references (e.g. what topics would be familiar at that age/grade in that country's education system) to suit them specifically. Do not mention their age, year, or country back to them explicitly — just let it shape the steps.`
+    : '';
+
+  const system = `You are a Socratic thinking guide. You NEVER state the final answer to the person's question, no matter how directly they ask, and you never hint so strongly the answer becomes obvious from step 1. Break the path to an answer into 4-6 sequential steps that build on each other, each prompting the person to reason, recall, calculate, or investigate something themselves, calibrated to the specific question (not generic advice like "do some research").
+${profileLine}
+
+Respond with ONLY raw JSON, no markdown fences, no preamble, matching exactly this shape:
+{
+  "reframe": "a one-sentence restatement of what's really being asked, in an inviting tone",
+  "steps": [
+    { "label": "short 2-4 word step title", "prompt": "the guiding question or instruction, written directly to the person", "hint": "a gentle nudge to show alongside this step, still not the answer" }
+  ]
+}`;
+
+  const apiKey = (process.env.GEMINI_API_KEY || '').trim();
+  if (!apiKey) {
+    return res.status(500).json({ error: 'GEMINI_API_KEY is missing or empty on the server' });
+  }
+
+  try {
+    const r = await fetch(
+      'https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent',
+      {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-goog-api-key': apiKey
+        },
+        body: JSON.stringify({
+          system_instruction: { parts: [{ text: system }] },
+          contents: [{ role: 'user', parts: [{ text: question.trim() }] }]
+        })
+      }
+    );
+
+    if (!r.ok) {
+      const detail = await r.text();
+      return res.status(502).json({ error: 'Upstream error', detail });
+    }
+
+    const data = await r.json();
+    const parts = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts) || [];
+    const text = parts.map(p => p.text || '').join('\n').trim();
+    const jsonStr = extractJson(text);
+
+    let parsed;
+    try {
+      parsed = JSON.parse(jsonStr);
+    } catch (e) {
+      return res.status(502).json({ error: 'The guide came back malformed' });
+    }
+    if (!parsed || !Array.isArray(parsed.steps) || parsed.steps.length === 0) {
+      return res.status(502).json({ error: 'The guide came back incomplete' });
+    }
+
+    return res.status(200).json(parsed);
+  } catch (err) {
+    return res.status(500).json({ error: err.message || 'Unknown error' });
+  }
+}
+
+function extractJson(t) {
+  let s = t.replace(/^```json\s*/i, '').replace(/^```\s*/, '').replace(/```\s*$/, '').trim();
+  const first = s.indexOf('{');
+  const last = s.lastIndexOf('}');
+  if (first !== -1 && last !== -1 && last > first) {
+    const candidate = s.slice(first, last + 1);
+    try { JSON.parse(candidate); return candidate; } catch (e) { /* fall through */ }
+  }
+  return s;
+}
+
   font-size: 34px;
   line-height: 1.15;
   margin: 0 0 12px;
