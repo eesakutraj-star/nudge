@@ -285,6 +285,9 @@ textarea.input::placeholder { color: #b8ab8a; }
     reflection: '',
     feedback: '',
     feedbackLoading: false,
+    understood: null,          // null = not asked yet, true/false = answered
+    continuing: false,          // loading state for the "easier round" call
+    roundStarts: [],            // indices in state.steps where a new (easier) round begins
     errorMsg: ''
   };
 
@@ -317,6 +320,24 @@ textarea.input::placeholder { color: #b8ab8a; }
     const data = await res.json();
     if (!res.ok) throw new Error((data.error || 'Request failed') + (data.detail ? ': ' + String(data.detail).slice(0,200) : ''));
     return data.feedback;
+  }
+
+  async function generateContinuation() {
+    const res = await fetch('/api/continue', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        question: state.question,
+        profile: state.profile,
+        priorSteps: state.steps,
+        notes: state.notes,
+        reflection: state.reflection,
+        feedback: state.feedback
+      })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error((data.error || 'Request failed') + (data.detail ? ': ' + String(data.detail).slice(0,200) : ''));
+    return data;
   }
 
   function render() {
@@ -392,13 +413,15 @@ textarea.input::placeholder { color: #b8ab8a; }
         const isLast = i === state.revealed - 1;
         const showAdvance = isLast && i < total - 1;
         const showFinal = isLast && i === total - 1;
+        const roundNote = state.roundStarts.find(r => r.index === i);
         return `
+          ${roundNote ? `<p class="reframe" style="margin-top:-6px;">${esc(roundNote.note)}</p>` : ''}
           <div class="step">
             <p class="step-label">${i+1} / ${total} — ${esc(s.label)}</p>
             <p class="step-prompt">${esc(s.prompt)}</p>
-            <textarea class="notes" placeholder="jot your thinking here (optional)" data-notes-idx="${i}">${esc(state.notes[i] || '')}</textarea>
+            <textarea class="notes" placeholder="write your thinking here — needed before you move on" data-notes-idx="${i}">${esc(state.notes[i] || '')}</textarea>
             <div class="hint">nudge — ${esc(s.hint)}</div>
-            ${showAdvance ? `<div class="advance"><button class="btn" data-advance="1">Next step</button></div>` : ''}
+            ${showAdvance ? `<div class="advance"><button class="btn" data-advance="1" data-for="${i}" ${!(state.notes[i] || '').trim() ? 'disabled' : ''}>Next step</button></div>` : ''}
             ${showFinal ? renderFinal() : ''}
           </div>
         `;
@@ -420,11 +443,17 @@ textarea.input::placeholder { color: #b8ab8a; }
           <div class="rail">${railHtml}</div>
           <div class="steps">${stepsHtml}</div>
         </div>
+        ${state.errorMsg ? `<p class="error">${esc(state.errorMsg)}</p>` : ''}
         <div class="restart"><button class="ghost" id="restart">start a new question</button></div>
       `;
 
       root.querySelectorAll('[data-notes-idx]').forEach(el => {
-        el.addEventListener('input', e => { state.notes[el.dataset.notesIdx] = e.target.value; });
+        el.addEventListener('input', e => {
+          const idx = el.dataset.notesIdx;
+          state.notes[idx] = e.target.value;
+          const btn = root.querySelector(`[data-advance][data-for="${idx}"]`);
+          if (btn) btn.disabled = !e.target.value.trim();
+        });
       });
       const advBtn = root.querySelector('[data-advance]');
       if (advBtn) advBtn.addEventListener('click', () => { state.revealed = Math.min(state.revealed + 1, total); render(); });
@@ -434,10 +463,15 @@ textarea.input::placeholder { color: #b8ab8a; }
       if (reflectEl) reflectEl.addEventListener('input', e => state.reflection = e.target.value);
       const checkBtn = document.getElementById('check');
       if (checkBtn) checkBtn.addEventListener('click', onCheck);
+      const yesBtn = document.getElementById('understood-yes');
+      if (yesBtn) yesBtn.addEventListener('click', () => { state.understood = true; render(); });
+      const noBtn = document.getElementById('understood-no');
+      if (noBtn) noBtn.addEventListener('click', onContinueEasier);
     }
   }
 
   function renderFinal() {
+    const showUnderstandingCheck = !!state.feedback && !state.continuing;
     return `
       <div class="final">
         <p class="final-label">Your conclusion</p>
@@ -447,6 +481,21 @@ textarea.input::placeholder { color: #b8ab8a; }
           <button class="btn" id="check" ${state.feedbackLoading ? 'disabled' : ''}>${state.feedbackLoading ? 'Reading…' : 'Check my reasoning'}</button>
         </div>
         ${state.feedback ? `<div class="feedback">${esc(state.feedback)}</div>` : ''}
+        ${showUnderstandingCheck && state.understood === null ? `
+          <div style="margin-top:16px;padding-top:14px;border-top:1px dashed #3a4258;">
+            <p style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-paper-dim);margin:0 0 10px;">Do you feel like you understand it now?</p>
+            <div style="display:flex;gap:10px;">
+              <button class="btn" id="understood-yes">Yes, I've got it</button>
+              <button class="ghost" id="understood-no">Not quite yet</button>
+            </div>
+          </div>
+        ` : ''}
+        ${state.continuing ? `<div class="loading" style="margin-top:14px;"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Breaking it down further</div>` : ''}
+        ${state.understood === true ? `
+          <div style="margin-top:16px;padding-top:14px;border-top:1px dashed #3a4258;">
+            <p style="font-family:'Fraunces',serif;font-size:15.5px;color:var(--text-paper);margin:0;">Good — that's the whole point: you got there yourself.</p>
+          </div>
+        ` : ''}
       </div>
     `;
   }
@@ -484,6 +533,26 @@ textarea.input::placeholder { color: #b8ab8a; }
     render();
   }
 
+  async function onContinueEasier() {
+    state.continuing = true;
+    state.errorMsg = '';
+    render();
+    try {
+      const cont = await generateContinuation();
+      const startIndex = state.steps.length;
+      state.roundStarts.push({ index: startIndex, note: cont.note || "Let's slow down and take smaller steps." });
+      state.steps = state.steps.concat(cont.steps);
+      state.revealed = startIndex + 1;
+      state.reflection = '';
+      state.feedback = '';
+      state.understood = null;
+    } catch (err) {
+      state.errorMsg = 'Could not get an easier round just now (' + err.message + ') — mind trying again?';
+    }
+    state.continuing = false;
+    render();
+  }
+
   function resetAll() {
     state.phase = 'intro';
     state.question = '';
@@ -493,6 +562,9 @@ textarea.input::placeholder { color: #b8ab8a; }
     state.notes = {};
     state.reflection = '';
     state.feedback = '';
+    state.understood = null;
+    state.continuing = false;
+    state.roundStarts = [];
     state.errorMsg = '';
     render();
   }
