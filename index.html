@@ -287,6 +287,7 @@ textarea.input::placeholder { color: #b8ab8a; }
     feedbackLoading: false,
     recommendContinue: false,
     understood: null,          // null = not asked yet, true/false = answered
+    profileChecking: false,
     continuing: false,          // loading state for the "easier round" call
     roundStarts: [],            // indices in state.steps where a new (easier) round begins
     errorMsg: ''
@@ -365,14 +366,14 @@ textarea.input::placeholder { color: #b8ab8a; }
           <textarea class="input" id="p-age" style="min-height:auto;height:44px;" placeholder="e.g. 14" inputmode="numeric">${esc(state.profile.age)}</textarea>
         </div>
         <div class="btn-row" style="margin-left:0;">
-          <button class="btn" id="p-continue">Continue</button>
+          <button class="btn" id="p-continue" ${state.profileChecking ? 'disabled' : ''}>${state.profileChecking ? 'Checking…' : 'Continue'}</button>
         </div>
         ${state.errorMsg ? `<p class="error">${esc(state.errorMsg)}</p>` : ''}
       `;
       document.getElementById('p-country').addEventListener('change', e => state.profile.country = e.target.value);
       document.getElementById('p-year').addEventListener('input', e => state.profile.year = e.target.value);
       document.getElementById('p-age').addEventListener('input', e => state.profile.age = e.target.value);
-      document.getElementById('p-continue').addEventListener('click', () => {
+      document.getElementById('p-continue').addEventListener('click', async () => {
         const country = state.profile.country.trim();
         const year = state.profile.year.trim();
         const age = state.profile.age.trim();
@@ -392,6 +393,24 @@ textarea.input::placeholder { color: #b8ab8a; }
           render();
           return;
         }
+        // Any number appearing anywhere in the text must be a plausible school year/grade number.
+        // Non-numeric text should also contain a recognizable schooling word.
+        const numbersInText = (year.match(/\d+/g) || []).map(Number);
+        const hasImplausibleNumber = numbersInText.some(n => n < 1 || n > 20);
+        if (hasImplausibleNumber) {
+          state.errorMsg = 'That number doesn\'t look like a real school year or grade — try something like "Year 7" or "Grade 8".';
+          render();
+          return;
+        }
+        const isPureNumber = /^\d+$/.test(year);
+        if (!isPureNumber) {
+          const knownWords = /(year|grade|form|class|standard|primary|secondary|kindergarten|reception|nursery|pre-?k|freshman|sophomore|junior|senior|university|college|undergrad|postgrad|masters?|phd|doctorate|not in school|homeschool|adult|gap year|k[0-9]|p[0-9]|s[0-9])/i;
+          if (!knownWords.test(year)) {
+            state.errorMsg = 'Please use a recognizable school year or grade (e.g. "Year 9", "Grade 8", "Form 3", "University", "Not currently in school").';
+            render();
+            return;
+          }
+        }
         const ageNum = Number(age);
         if (!age || !/^\d{1,3}$/.test(age) || !Number.isInteger(ageNum) || ageNum < 3 || ageNum > 100) {
           state.errorMsg = 'Please enter a valid age between 3 and 100.';
@@ -399,6 +418,30 @@ textarea.input::placeholder { color: #b8ab8a; }
           return;
         }
 
+        state.errorMsg = '';
+        state.profileChecking = true;
+        render();
+
+        try {
+          const res = await fetch('/api/validate-profile', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ country, year, age })
+          });
+          const data = await res.json();
+          if (!res.ok) throw new Error(data.error || 'Validation request failed');
+
+          if (data.valid === false) {
+            state.profileChecking = false;
+            state.errorMsg = data.reason || 'That year/grade and age combination doesn\'t look right for that country — mind double-checking it?';
+            render();
+            return;
+          }
+        } catch (err) {
+          // fail open — don't block someone from using the app if the check itself errors out
+        }
+
+        state.profileChecking = false;
         state.errorMsg = '';
         localStorage.setItem('sq-profile', JSON.stringify(state.profile));
         state.phase = 'intro';
