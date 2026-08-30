@@ -285,11 +285,14 @@ textarea.input::placeholder { color: #b8ab8a; }
     reflection: '',
     feedback: '',
     feedbackLoading: false,
+    recommendContinue: false,
     understood: null,          // null = not asked yet, true/false = answered
     continuing: false,          // loading state for the "easier round" call
     roundStarts: [],            // indices in state.steps where a new (easier) round begins
     errorMsg: ''
   };
+
+  const COUNTRIES = ["Afghanistan","Albania","Algeria","Andorra","Angola","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cambodia","Cameroon","Canada","Cape Verde","Central African Republic","Chad","Chile","China","Colombia","Comoros","Costa Rica","Croatia","Cuba","Cyprus","Czechia","Democratic Republic of the Congo","Denmark","Djibouti","Dominica","Dominican Republic","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Ivory Coast","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kiribati","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Palau","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Republic of the Congo","Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","Sao Tome and Principe","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe"];
 
   function esc(str) {
     return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -319,7 +322,7 @@ textarea.input::placeholder { color: #b8ab8a; }
     });
     const data = await res.json();
     if (!res.ok) throw new Error((data.error || 'Request failed') + (data.detail ? ': ' + String(data.detail).slice(0,200) : ''));
-    return data.feedback;
+    return data;
   }
 
   async function generateContinuation() {
@@ -348,7 +351,10 @@ textarea.input::placeholder { color: #b8ab8a; }
         <p class="sub">This helps the guide match your school level and curriculum, rather than guessing.</p>
         <div class="card">
           <p class="label">Country</p>
-          <textarea class="input" id="p-country" style="min-height:auto;height:44px;" placeholder="e.g. United Kingdom">${esc(state.profile.country)}</textarea>
+          <select id="p-country" style="width:calc(100% - 62px);margin-left:62px;height:44px;font-family:'Fraunces',serif;font-size:16px;color:var(--text-ink);background:transparent;border:none;outline:none;">
+            <option value="" ${!state.profile.country ? 'selected' : ''} disabled>Select your country…</option>
+            ${COUNTRIES.map(c => `<option value="${esc(c)}" ${state.profile.country === c ? 'selected' : ''}>${esc(c)}</option>`).join('')}
+          </select>
         </div>
         <div class="card" style="margin-top:18px;">
           <p class="label">School year / grade</p>
@@ -356,22 +362,43 @@ textarea.input::placeholder { color: #b8ab8a; }
         </div>
         <div class="card" style="margin-top:18px;">
           <p class="label">Age</p>
-          <textarea class="input" id="p-age" style="min-height:auto;height:44px;" placeholder="e.g. 14">${esc(state.profile.age)}</textarea>
+          <textarea class="input" id="p-age" style="min-height:auto;height:44px;" placeholder="e.g. 14" inputmode="numeric">${esc(state.profile.age)}</textarea>
         </div>
         <div class="btn-row" style="margin-left:0;">
           <button class="btn" id="p-continue">Continue</button>
         </div>
         ${state.errorMsg ? `<p class="error">${esc(state.errorMsg)}</p>` : ''}
       `;
-      document.getElementById('p-country').addEventListener('input', e => state.profile.country = e.target.value);
+      document.getElementById('p-country').addEventListener('change', e => state.profile.country = e.target.value);
       document.getElementById('p-year').addEventListener('input', e => state.profile.year = e.target.value);
       document.getElementById('p-age').addEventListener('input', e => state.profile.age = e.target.value);
       document.getElementById('p-continue').addEventListener('click', () => {
-        if (!state.profile.country.trim() || !state.profile.year.trim() || !state.profile.age.trim()) {
-          state.errorMsg = 'Please fill in all three before continuing.';
+        const country = state.profile.country.trim();
+        const year = state.profile.year.trim();
+        const age = state.profile.age.trim();
+
+        if (!country) {
+          state.errorMsg = 'Please select a country from the list.';
           render();
           return;
         }
+        if (!COUNTRIES.includes(country)) {
+          state.errorMsg = 'Please choose a country from the dropdown list.';
+          render();
+          return;
+        }
+        if (!year || year.length > 40 || !/[a-zA-Z0-9]/.test(year)) {
+          state.errorMsg = 'Please enter a real school year or grade (e.g. "Year 9" or "Grade 8").';
+          render();
+          return;
+        }
+        const ageNum = Number(age);
+        if (!age || !/^\d{1,3}$/.test(age) || !Number.isInteger(ageNum) || ageNum < 3 || ageNum > 100) {
+          state.errorMsg = 'Please enter a valid age between 3 and 100.';
+          render();
+          return;
+        }
+
         state.errorMsg = '';
         localStorage.setItem('sq-profile', JSON.stringify(state.profile));
         state.phase = 'intro';
@@ -472,6 +499,7 @@ textarea.input::placeholder { color: #b8ab8a; }
 
   function renderFinal() {
     const showUnderstandingCheck = !!state.feedback && !state.continuing;
+    const farOff = state.recommendContinue === true;
     return `
       <div class="final">
         <p class="final-label">Your conclusion</p>
@@ -481,12 +509,17 @@ textarea.input::placeholder { color: #b8ab8a; }
           <button class="btn" id="check" ${state.feedbackLoading ? 'disabled' : ''}>${state.feedbackLoading ? 'Reading…' : 'Check my reasoning'}</button>
         </div>
         ${state.feedback ? `<div class="feedback">${esc(state.feedback)}</div>` : ''}
+        ${showUnderstandingCheck && farOff ? `
+          <div style="margin-top:14px;padding:10px 12px;background:rgba(216,147,60,0.1);border-left:2px solid var(--accent-dim);border-radius:2px;">
+            <p style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--accent);margin:0;">This reasoning is off track — going through an easier round is strongly recommended before moving on.</p>
+          </div>
+        ` : ''}
         ${showUnderstandingCheck && state.understood === null ? `
           <div style="margin-top:16px;padding-top:14px;border-top:1px dashed #3a4258;">
             <p style="font-family:'IBM Plex Mono',monospace;font-size:12px;color:var(--text-paper-dim);margin:0 0 10px;">Do you feel like you understand it now?</p>
             <div style="display:flex;gap:10px;">
-              <button class="btn" id="understood-yes">Yes, I've got it</button>
-              <button class="ghost" id="understood-no">Not quite yet</button>
+              <button class="${farOff ? 'ghost' : 'btn'}" id="understood-yes">Yes, I've got it</button>
+              <button class="${farOff ? 'btn' : 'ghost'}" id="understood-no">${farOff ? 'Continue with more questions' : 'Not quite yet'}</button>
             </div>
           </div>
         ` : ''}
@@ -507,12 +540,19 @@ textarea.input::placeholder { color: #b8ab8a; }
     render();
     try {
       const guide = await generateGuide(state.question.trim());
+      if (guide.valid === false) {
+        state.phase = 'intro';
+        state.errorMsg = guide.reason || "That doesn't look like a clear question yet — mind rephrasing it?";
+        render();
+        return;
+      }
       state.reframe = guide.reframe;
       state.steps = guide.steps;
       state.revealed = 1;
       state.notes = {};
       state.reflection = '';
       state.feedback = '';
+      state.recommendContinue = false;
       state.phase = 'guide';
     } catch (err) {
       state.phase = 'intro';
@@ -525,9 +565,12 @@ textarea.input::placeholder { color: #b8ab8a; }
     state.feedbackLoading = true;
     render();
     try {
-      state.feedback = await generateFeedback();
+      const result = await generateFeedback();
+      state.feedback = result.feedback;
+      state.recommendContinue = !!result.recommendContinue;
     } catch (err) {
       state.feedback = "Couldn't fetch feedback just now — try again in a moment.";
+      state.recommendContinue = false;
     }
     state.feedbackLoading = false;
     render();
@@ -545,6 +588,7 @@ textarea.input::placeholder { color: #b8ab8a; }
       state.revealed = startIndex + 1;
       state.reflection = '';
       state.feedback = '';
+      state.recommendContinue = false;
       state.understood = null;
     } catch (err) {
       state.errorMsg = 'Could not get an easier round just now (' + err.message + ') — mind trying again?';
@@ -562,6 +606,7 @@ textarea.input::placeholder { color: #b8ab8a; }
     state.notes = {};
     state.reflection = '';
     state.feedback = '';
+      state.recommendContinue = false;
     state.understood = null;
     state.continuing = false;
     state.roundStarts = [];
