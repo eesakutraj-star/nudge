@@ -288,12 +288,16 @@ textarea.input::placeholder { color: #b8ab8a; }
     recommendContinue: false,
     understood: null,          // null = not asked yet, true/false = answered
     profileChecking: false,
+    subject: '',
+    speakingIdx: null,
     continuing: false,          // loading state for the "easier round" call
     roundStarts: [],            // indices in state.steps where a new (easier) round begins
     errorMsg: ''
   };
 
   const COUNTRIES = ["Afghanistan","Albania","Algeria","Andorra","Angola","Argentina","Armenia","Australia","Austria","Azerbaijan","Bahamas","Bahrain","Bangladesh","Barbados","Belarus","Belgium","Belize","Benin","Bhutan","Bolivia","Bosnia and Herzegovina","Botswana","Brazil","Brunei","Bulgaria","Burkina Faso","Burundi","Cambodia","Cameroon","Canada","Cape Verde","Central African Republic","Chad","Chile","China","Colombia","Comoros","Costa Rica","Croatia","Cuba","Cyprus","Czechia","Democratic Republic of the Congo","Denmark","Djibouti","Dominica","Dominican Republic","Ecuador","Egypt","El Salvador","Equatorial Guinea","Eritrea","Estonia","Eswatini","Ethiopia","Fiji","Finland","France","Gabon","Gambia","Georgia","Germany","Ghana","Greece","Grenada","Guatemala","Guinea","Guinea-Bissau","Guyana","Haiti","Honduras","Hungary","Iceland","India","Indonesia","Iran","Iraq","Ireland","Israel","Italy","Ivory Coast","Jamaica","Japan","Jordan","Kazakhstan","Kenya","Kiribati","Kosovo","Kuwait","Kyrgyzstan","Laos","Latvia","Lebanon","Lesotho","Liberia","Libya","Liechtenstein","Lithuania","Luxembourg","Madagascar","Malawi","Malaysia","Maldives","Mali","Malta","Marshall Islands","Mauritania","Mauritius","Mexico","Micronesia","Moldova","Monaco","Mongolia","Montenegro","Morocco","Mozambique","Myanmar","Namibia","Nauru","Nepal","Netherlands","New Zealand","Nicaragua","Niger","Nigeria","North Korea","North Macedonia","Norway","Oman","Pakistan","Palau","Palestine","Panama","Papua New Guinea","Paraguay","Peru","Philippines","Poland","Portugal","Qatar","Republic of the Congo","Romania","Russia","Rwanda","Saint Kitts and Nevis","Saint Lucia","Saint Vincent and the Grenadines","Samoa","San Marino","Sao Tome and Principe","Saudi Arabia","Senegal","Serbia","Seychelles","Sierra Leone","Singapore","Slovakia","Slovenia","Solomon Islands","Somalia","South Africa","South Korea","South Sudan","Spain","Sri Lanka","Sudan","Suriname","Sweden","Switzerland","Syria","Taiwan","Tajikistan","Tanzania","Thailand","Timor-Leste","Togo","Tonga","Trinidad and Tobago","Tunisia","Turkey","Turkmenistan","Tuvalu","Uganda","Ukraine","United Arab Emirates","United Kingdom","United States","Uruguay","Uzbekistan","Vanuatu","Vatican City","Venezuela","Vietnam","Yemen","Zambia","Zimbabwe"];
+
+  const SUBJECTS = ["Maths","English","Science","Biology","Chemistry","Physics","History","Geography","Computing","Languages","Art and design","Music","Business and economics","Other"];
 
   function esc(str) {
     return String(str || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -303,7 +307,7 @@ textarea.input::placeholder { color: #b8ab8a; }
     const res = await fetch('/api/guide', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ question, profile: state.profile })
+      body: JSON.stringify({ question, profile: state.profile, subject: state.subject })
     });
     const data = await res.json();
     if (!res.ok) throw new Error((data.error || 'Request failed') + (data.detail ? ': ' + String(data.detail).slice(0,200) : ''));
@@ -333,6 +337,7 @@ textarea.input::placeholder { color: #b8ab8a; }
       body: JSON.stringify({
         question: state.question,
         profile: state.profile,
+        subject: state.subject,
         priorSteps: state.steps,
         notes: state.notes,
         reflection: state.reflection,
@@ -460,6 +465,11 @@ textarea.input::placeholder { color: #b8ab8a; }
           <button class="ghost" id="edit-profile" style="font-size:12px;">change</button>
         </p>
         <div class="card">
+          <p class="label">Subject (optional)</p>
+          <select id="subject" style="width:calc(100% - 62px);margin-left:62px;height:40px;margin-bottom:14px;font-family:'Fraunces',serif;font-size:16px;color:var(--text-ink);background:transparent;border:none;outline:none;">
+            <option value="" ${!state.subject ? 'selected' : ''}>Any subject</option>
+            ${SUBJECTS.map(x => `<option value="${esc(x)}" ${state.subject === x ? 'selected' : ''}>${esc(x)}</option>`).join('')}
+          </select>
           <p class="label">Your question</p>
           <textarea class="input" id="q" placeholder="e.g. Why does the sky turn red at sunset?">${esc(state.question)}</textarea>
           <div class="btn-row">
@@ -469,6 +479,7 @@ textarea.input::placeholder { color: #b8ab8a; }
         ${state.phase === 'loading' ? `<div class="loading"><span class="dot"></span><span class="dot"></span><span class="dot"></span> Mapping out a path, not the destination</div>` : ''}
         ${state.errorMsg ? `<p class="error">${esc(state.errorMsg)}</p>` : ''}
       `;
+      document.getElementById('subject').addEventListener('change', e => state.subject = e.target.value);
       const qEl = document.getElementById('q');
       qEl.addEventListener('input', e => state.question = e.target.value);
       document.getElementById('go').addEventListener('click', onBegin);
@@ -489,6 +500,7 @@ textarea.input::placeholder { color: #b8ab8a; }
           <div class="step">
             <p class="step-label">${i+1} / ${total} — ${esc(s.label)}</p>
             <p class="step-prompt">${esc(s.prompt)}</p>
+            ${'speechSynthesis' in window ? `<button class="ghost" data-speak="${i}" style="margin:-4px 0 10px;font-size:12px;">${state.speakingIdx === i ? 'Stop reading' : 'Read aloud'}</button>` : ''}
             <textarea class="notes" placeholder="write your thinking here — needed before you move on" data-notes-idx="${i}">${esc(state.notes[i] || '')}</textarea>
             <div class="hint">nudge — ${esc(s.hint)}</div>
             ${showAdvance ? `<div class="advance"><button class="btn" data-advance="1" data-for="${i}" ${!(state.notes[i] || '').trim() ? 'disabled' : ''}>Next step</button></div>` : ''}
@@ -529,6 +541,9 @@ textarea.input::placeholder { color: #b8ab8a; }
       if (advBtn) advBtn.addEventListener('click', () => { state.revealed = Math.min(state.revealed + 1, total); render(); });
       const restartBtn = document.getElementById('restart');
       if (restartBtn) restartBtn.addEventListener('click', resetAll);
+      root.querySelectorAll('[data-speak]').forEach(btn => {
+        btn.addEventListener('click', () => toggleSpeak(Number(btn.dataset.speak)));
+      });
       const reflectEl = document.getElementById('reflect');
       if (reflectEl) reflectEl.addEventListener('input', e => state.reflection = e.target.value);
       const checkBtn = document.getElementById('check');
@@ -574,6 +589,25 @@ textarea.input::placeholder { color: #b8ab8a; }
         ` : ''}
       </div>
     `;
+  }
+
+  function stopSpeaking() {
+    if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+    state.speakingIdx = null;
+  }
+
+  function toggleSpeak(i) {
+    if (!('speechSynthesis' in window)) return;
+    if (state.speakingIdx === i) { stopSpeaking(); render(); return; }
+    stopSpeaking();
+    const s = state.steps[i];
+    const u = new SpeechSynthesisUtterance(s.label + '. ' + s.prompt + ' Here is a nudge. ' + s.hint);
+    u.rate = 0.95;
+    u.onend = () => { if (state.speakingIdx === i) { state.speakingIdx = null; render(); } };
+    u.onerror = u.onend;
+    state.speakingIdx = i;
+    window.speechSynthesis.speak(u);
+    render();
   }
 
   async function onBegin() {
@@ -641,6 +675,7 @@ textarea.input::placeholder { color: #b8ab8a; }
   }
 
   function resetAll() {
+    stopSpeaking();
     state.phase = 'intro';
     state.question = '';
     state.reframe = '';

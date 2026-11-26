@@ -3,7 +3,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { question, profile } = req.body || {};
+  const { question, profile, subject } = req.body || {};
   if (!question || typeof question !== 'string' || !question.trim()) {
     return res.status(400).json({ error: 'Missing question' });
   }
@@ -23,6 +23,8 @@ export default async function handler(req, res) {
   const country = (profile && profile.country) ? String(profile.country).slice(0, 80) : '';
   const year = (profile && profile.year) ? String(profile.year).slice(0, 40) : '';
   const age = (profile && profile.age) ? String(profile.age).slice(0, 10) : '';
+  const subjectName = (typeof subject === 'string') ? subject.trim().slice(0, 40) : '';
+  const subjectLine = subjectName ? `The person chose the subject "${subjectName}". Frame the steps using that subject's way of thinking and typical methods, while still keeping to what their question actually asks.` : '';
   const profileLine = (country || year || age)
     ? `The person is ${age ? age + ' years old, ' : ''}in school year/grade "${year || 'unspecified'}", in ${country || 'an unspecified country'}. Calibrate vocabulary, complexity, and any curriculum or subject references (e.g. what topics would be familiar at that age/grade in that country's education system) to suit them specifically. Do not mention their age, year, or country back to them explicitly — just let it shape the steps.`
     : '';
@@ -34,6 +36,7 @@ If it is NOT valid, respond with ONLY this JSON and nothing else:
 
 If it IS valid, you NEVER state the final answer to the person's question, no matter how directly they ask, and you never hint so strongly the answer becomes obvious from step 1. Break the path to an answer into 4-6 sequential steps that build on each other, each prompting the person to reason, recall, calculate, or investigate something themselves, calibrated to the specific question (not generic advice like "do some research").
 ${profileLine}
+${subjectLine}
 
 Respond with ONLY raw JSON, no markdown fences, no preamble, matching exactly this shape:
 {
