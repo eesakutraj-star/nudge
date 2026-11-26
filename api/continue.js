@@ -3,7 +3,7 @@ export default async function handler(req, res) {
     return res.status(405).json({ error: 'Method not allowed' });
   }
 
-  const { question, profile, priorSteps, notes, reflection, feedback } = req.body || {};
+  const { question, profile, subject, priorSteps, notes, reflection, feedback } = req.body || {};
   if (!question || !Array.isArray(priorSteps)) {
     return res.status(400).json({ error: 'Missing question or priorSteps' });
   }
@@ -11,6 +11,8 @@ export default async function handler(req, res) {
   const country = (profile && profile.country) ? String(profile.country).slice(0, 80) : '';
   const year = (profile && profile.year) ? String(profile.year).slice(0, 40) : '';
   const age = (profile && profile.age) ? String(profile.age).slice(0, 10) : '';
+  const subjectName = (typeof subject === 'string') ? subject.trim().slice(0, 40) : '';
+  const subjectLine = subjectName ? `The person chose the subject "${subjectName}". Frame the steps using that subject's way of thinking and typical methods, while still keeping to what their question actually asks.` : '';
   const profileLine = (country || year || age)
     ? `The person is ${age ? age + ' years old, ' : ''}in school year/grade "${year || 'unspecified'}", in ${country || 'an unspecified country'}. Calibrate vocabulary and complexity accordingly.`
     : '';
@@ -22,6 +24,7 @@ export default async function handler(req, res) {
   const system = `You are a Socratic thinking guide. The person went through a guided path for their own question, wrote a conclusion, got feedback, and said they STILL don't feel like they understand. You NEVER reveal the answer, no matter how directly asked.
 
 Your job now: produce 2-4 NEW steps that are noticeably SIMPLER and MORE BROKEN DOWN than before — smaller leaps, more concrete, more everyday language, maybe using a simpler analogy or a smaller worked example as a stepping stone before returning to their actual question. Build on what they already attempted; do not just repeat the earlier steps. ${profileLine}
+${subjectLine}
 
 Respond with ONLY raw JSON, no markdown fences, no preamble, matching exactly this shape:
 {
